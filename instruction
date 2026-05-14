@@ -1,0 +1,82 @@
+Title: Notification Service - Instruction
+
+Overview
+- This service accepts domain events via an Express API, persists them in Postgres, and enqueues delivery tasks to Kafka.
+- A consumer (worker) reads Kafka topics and attempts per-channel deliveries (EMAIL, SMS, etc.) using provider implementations.
+
+Flow (end-to-end)
+1. Client POSTs an event to `POST /api/v1/notifications/events`.
+2. API validates and persists a `Notification` row in Postgres.
+3. The API publishes a message to a Kafka topic according to event `priority` (e.g., `notifications.high`).
+4. Kafka consumers (worker service) receive the message and create `NotificationDelivery` rows for each channel.
+5. The worker attempts to send via the provider. On success the delivery is marked `SENT`.
+6. On failure, the worker uses a retry policy to set `RETRYING` with `next_retry_at`, or marks `FAILED` and publishes to a DLQ after max attempts.
+7. A retry-poller periodically scans the DB for `RETRYING` rows and re-enqueues them to Kafka when due.
+
+Key components
+- API: `src/api/routes/notifications.js` — accepts events and publishes to Kafka.
+- Models & migrations: `src/models/*` and `src/db/migrations/*` — Postgres schema for notifications and deliveries.
+- Queue: `src/queue/*` — Kafka client and topic constants.
+- Worker: `src/workers/*` — `kafkaConsumer.js`, `BaseWorker.js`, `retryPoller.js`, CLI `worker.js` for manual runs.
+- Core: `src/core/*` — `stateMachine`, `idempotency` (Redis), `retryPolicy`, and `circuitBreaker` (Redis-backed).
+- Providers: `src/providers/*` — mock providers included; swap for real integrations as needed.
+- Logging: `src/logger` — Winston JSON logs.
+
+Important behaviours
+- Idempotency: API uses Redis to ensure the same `eventId` is not processed twice.
+- State machine: deliveries progress through `PENDING -> QUEUED -> SENDING -> {SENT, RETRYING, FAILED}`.
+- Retry policy: exponential backoff with jitter is used; after configured max attempts deliveries go to DLQ.
+- Circuit breaker: per-provider Redis-backed breaker opens after N failures within a time window, preventing further calls for an open duration.
+
+Tradeoffs and rationale
+- Postgres as source-of-truth: reliable persistence and ability to query delivery state; simplifies retry polling but requires DB maintenance.
+- Kafka for work distribution: supports horizontal scaling and backpressure; adds operational complexity (Zookeeper/Kafka config).
+- Redis for idempotency and circuit state: fast and ephemeral; requires Redis availability (if Redis is down, idempotency/circuit features can be degraded).
+- DLQ via Kafka: keeps failed payloads for later inspection/repair but requires consumers/monitoring for DLQ processing.
+- Provider abstraction: mock providers enable local dev/testing; production providers should implement retry semantics and meaningful error codes.
+
+How to run (local, dev)
+1. Build & start containers:
+   docker-compose up -d
+
+2. Run migrations (inside container):
+   docker-compose run --rm api npm run migrate
+
+3. Clear idempotency keys (if re-testing):
+   docker-compose exec redis sh -c "redis-cli --scan --pattern 'idempotency:*' | xargs -r redis-cli del || echo 'no keys'"
+
+4. Start retry poller (detached):
+   docker-compose run -d --rm api npm run retry-poller
+
+5. Post a test event:
+   curl -X POST http://localhost:3000/api/v1/notifications/events \
+     -H 'Content-Type: application/json' \
+     -d '{"eventId":"<uuid>","type":"order.created","priority":"HIGH","payload":{"orderId":123}}'
+
+6. Watch worker logs:
+   docker-compose logs --tail=200 -f worker
+
+Quick checks
+- Inspect notifications table:
+  docker-compose exec postgres psql -U postgres -d notifications_db -c "select * from notifications order by created_at desc limit 10;"
+- Inspect deliveries:
+  docker-compose exec postgres psql -U postgres -d notifications_db -c "select * from notification_deliveries order by created_at desc limit 20;"
+
+Troubleshooting
+- If migrations fail locally, run them inside the `api` container to use the container network and credentials.
+- If worker cannot join Kafka, verify `KAFKA_BROKERS` env points to `kafka:9092` in docker-compose and that Kafka container is healthy.
+- If idempotency prevents a test from running, clear keys in Redis as above.
+
+Next improvements
+- Add integration tests for `BaseWorker` and retry flow.
+- Add Prometheus metrics (delivery latency, failures, circuit state, DLQ counts).
+- Replace mock providers with pluggable production providers and richer error mapping.
+- Add graceful shutdown and readiness/liveness probes for containers.
+
+File references
+- API: src/api/routes/notifications.js
+- Worker: src/workers/BaseWorker.js, src/workers/kafkaConsumer.js, src/workers/retryPoller.js
+- Core: src/core/idempotency.js, src/core/retryPolicy.js, src/core/circuitBreaker.js
+
+Contact
+- For any questions about running locally or adapting providers, ask me and I can add runbooks or CI integration.
