@@ -7,21 +7,22 @@ This README is intentionally aligned to the `task.md` deliverables: HLD system d
 ## 1 — High-Level Design (HLD)
 
 ### System Diagram (handles ~50,000 requests/min)
+
 ```mermaid
 flowchart LR
   subgraph Clients
     C[Upstream services]
   end
-  C -->|POST /api/v1/notifications/events| API[API (Express)]
-  API -->|idempotency (Redis) + validate| DB[(Postgres)]
+  C -->|"POST /api/v1/notifications/events"| API[API - Express]
+  API -->|"idempotency via Redis + validate"| DB[(Postgres)]
   DB -->|insert| Outbox[(notification_outbox)]
-  Outbox -->|poll & claim| Publisher[Outbox Publisher]
+  Outbox -->|"poll & claim"| Publisher[Outbox Publisher]
   Publisher -->|produce| Kafka[(Kafka)]
-  Kafka -->|consume| WorkerHigh[Worker (high-priority)]
-  Kafka -->|consume| WorkerLow[Worker (low-priority)]
-  WorkerHigh -->|create/update| DB
-  WorkerLow -->|create/update| DB
-  WorkerHigh -->|provider.send| Provider[Provider (EMAIL/SMS/PUSH)]
+  Kafka -->|consume| WorkerHigh[Worker - high priority]
+  Kafka -->|consume| WorkerLow[Worker - low priority]
+  WorkerHigh -->|"create/update"| DB
+  WorkerLow -->|"create/update"| DB
+  WorkerHigh -->|"provider.send"| Provider[Provider - EMAIL/SMS/PUSH]
 ```
 
 ### HLD Notes
