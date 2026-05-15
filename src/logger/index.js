@@ -1,5 +1,5 @@
 import { createLogger, format, transports } from 'winston';
-const { combine, timestamp, printf, json } = format;
+const { combine, timestamp, json } = format;
 import config from '../config/index.js';
 
 const logger = createLogger({

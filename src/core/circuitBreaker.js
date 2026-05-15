@@ -8,7 +8,7 @@ function mkKey(prefix, name) {
   return `cb:${prefix}:${name}`;
 }
 
-function createCircuitBreaker(redisClient, opts = {}) {
+export function createCircuitBreaker(redisClient, opts = {}) {
   const redis = redisClient || defaultRedis();
   const failureThreshold = opts.failureThreshold || parseInt(process.env.CB_FAILURE_THRESHOLD, 10) || 5;
   const windowSeconds = opts.windowSeconds || parseInt(process.env.CB_WINDOW_SECONDS, 10) || 60;
@@ -24,14 +24,12 @@ function createCircuitBreaker(redisClient, opts = {}) {
     const failuresKey = mkKey('failures', name);
     const stateKey = mkKey('state', name);
     const failures = await redis.incr(failuresKey);
-    // set expiry on the failures counter if it's new
     const ttl = await redis.ttl(failuresKey);
     if (ttl === -1) {
       await redis.expire(failuresKey, windowSeconds);
     }
 
     if (failures >= failureThreshold) {
-      // open the circuit
       await redis.set(stateKey, 'OPEN', 'EX', openDurationSeconds);
     }
     return failures;
@@ -48,6 +46,8 @@ function createCircuitBreaker(redisClient, opts = {}) {
     isOpen,
     recordFailure,
     recordSuccess,
+    getOpenDurationMs: () => openDurationSeconds * 1000,
+    getFailureThreshold: () => failureThreshold,
     _redis: redis,
     _opts: { failureThreshold, windowSeconds, openDurationSeconds },
   };

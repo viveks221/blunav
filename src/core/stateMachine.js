@@ -1,8 +1,15 @@
+/**
+ * Delivery lifecycle (DB statuses).
+ * PENDING: created, not yet claimed.
+ * QUEUED: claimed for retry re-enqueue from poller, ready for worker.
+ * SENDING: outbound call in flight.
+ * SENT / FAILED / RETRYING: terminal or waiting for retry.
+ */
 export const VALID_TRANSITIONS = {
-  PENDING: ['QUEUED'],
-  QUEUED: ['SENDING'],
+  PENDING: ['QUEUED', 'SENDING', 'RETRYING'],
+  QUEUED: ['SENDING', 'RETRYING'],
   SENDING: ['SENT', 'RETRYING', 'FAILED'],
-  RETRYING: ['QUEUED', 'FAILED'],
+  RETRYING: ['QUEUED', 'SENDING', 'FAILED'],
 };
 
 export function canTransition(from, to) {

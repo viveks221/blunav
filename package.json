@@ -10,10 +10,11 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js --watch src",
-    "test": "jest --coverage",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
     "demo": "bash scripts/demo.sh",
     "migrate": "node src/db/migrate.js",
     "retry-poller": "node src/workers/retryPoller.js",
+    "outbox-publisher": "node src/workers/outboxPublisher.js",
     "start-consumer": "node src/workers/kafkaConsumer.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -21,7 +22,6 @@
   },
   "dependencies": {
     "dotenv": "16.4.5",
-    "eslint": "^10.3.0",
     "express": "4.19.2",
     "ioredis": "5.3.2",
     "kafkajs": "2.2.4",
@@ -34,14 +34,15 @@
     "zod": "3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "eslint": "^10.3.0",
+    "globals": "^15.11.0",
     "ioredis-mock": "8.9.0",
     "jest": "29.7.0",
     "nodemon": "2.0.22"
-  }
-  ,
+  },
   "jest": {
     "testEnvironment": "node",
-    "extensionsToTreatAsEsm": [".js"],
     "transform": {}
   }
 }

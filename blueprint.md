@@ -1,7 +1,9 @@
 # Notification Service — Node.js Implementation Blueprint
 ### Express · KafkaJS · Sequelize · Umzug · Redis · Winston · Docker Compose
 
-> **How to use this document:** Hand this to an AI coding agent (Cursor, Claude Code, Copilot) as the single source of truth. Every section is a precise instruction. The agent should implement top-to-bottom without making any architectural decisions.
+> **Status (2026):** The **running system** is described in `README.md` and `instruction`. This blueprint is a long-form agent-oriented specification. Where it conflicts with the repository, **trust the code and README**.
+
+> **How to use this document:** Hand this to an AI coding agent (Cursor, Claude Code, Copilot) as extended reference material. For day-to-day operation and architecture diagrams, prefer `README.md`.
 
 ---
 

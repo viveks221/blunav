@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.1
@@ -17,6 +16,7 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
     ports:
       - 9092:9092
 
@@ -37,40 +37,43 @@ services:
       - 6379:6379
 
   api:
-    build: .
+    build:
+        context: .
+        dockerfile: Dockerfile
+        args:
+            mode: api
+    volumes:
+        - $HOME/.aws:/root/.aws:ro
+    ports:
+        - '3000:3000'
+    healthcheck:
+        test: ['CMD', 'curl', '-k', '-f', 'http://localhost:3000/health']
+        interval: 5s
+        timeout: 5s
+        retries: 1
+        start_period: 10s
     depends_on:
       - postgres
       - redis
+      - kafka
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/notifications_db
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - OUTBOX_INLINE_PUBLISHER=false
+
+  outbox-publisher:
+    build: .
+    depends_on:
+      - postgres
       - kafka
     environment:
       - NODE_ENV=development
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/notifications_db
-      - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:9092
-    ports:
-      - 3000:3000
-
-  worker-high:
-    build: .
-    depends_on:
-      - postgres
-      - redis
-      - kafka
-    environment:
-      - NODE_ENV=development
-      - QUEUE_TOPIC=notifications.high
-    command: sh -c "bash scripts/wait-for-kafka.sh && npm run start-consumer"
-
-  worker-low:
-    build: .
-    depends_on:
-      - postgres
-      - redis
-      - kafka
-    environment:
-      - NODE_ENV=development
-      - QUEUE_TOPIC=notifications.low
-    command: sh -c "bash scripts/wait-for-kafka.sh && npm run start-consumer"
+    command: sh -c "npm run outbox-publisher"
 
   worker:
     build: .
@@ -82,8 +85,41 @@ services:
       - NODE_ENV=development
       - KAFKA_BROKERS=kafka:9092
       - REDIS_URL=redis://redis:6379
-    command: npm run start-consumer
+      - KAFKA_SUBSCRIBE_TOPICS=notifications.high,notifications.low
+    command: sh -c "npm run start-consumer"
     restart: unless-stopped
+
+  worker-high:
+    build: .
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      - NODE_ENV=development
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=redis://redis:6379
+      - CONSUMER_GROUP=blunav-worker-high
+      - KAFKA_SUBSCRIBE_TOPICS=notifications.high
+    command: sh -c "npm run start-consumer"
+
+  worker-low:
+    build: .
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      - NODE_ENV=development
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=redis://redis:6379
+      - CONSUMER_GROUP=blunav-worker-low
+      - KAFKA_SUBSCRIBE_TOPICS=notifications.low
+    command: sh -c "npm run start-consumer"
 
 volumes:
   pgdata:
+
+networks:
+    blunav-network:
+        driver: bridge

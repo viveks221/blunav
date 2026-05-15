@@ -5,7 +5,7 @@ class MockEmailProvider extends BaseProvider {
     super('mock-email');
   }
 
-  async send({ to, subject, body }) {
+  async send({ to: _to, subject: _subject, body: _body }) {
     // simulate delivery
     return { ok: true, id: `msg_${Date.now()}` };
   }

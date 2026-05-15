@@ -34,7 +34,7 @@ export async function up(queryInterface, Sequelize) {
   });
 }
 
-export async function down(queryInterface, Sequelize) {
+export async function down(queryInterface, _Sequelize) {
   await queryInterface.dropTable('notification_deliveries');
   await queryInterface.dropTable('notifications');
   await queryInterface.sequelize.query('DROP TYPE IF EXISTS "enum_notifications_priority"');

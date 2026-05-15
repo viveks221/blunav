@@ -1,13 +1,15 @@
 import logger from '../logger/index.js';
 import models from '../models/index.js';
 import { Op } from 'sequelize';
+import { fileURLToPath } from 'url';
 import * as producer from '../queue/producer.js';
-import topics from '../queue/topics.js';
+import { topicForNotificationPriority } from '../queue/priorityRouting.js';
 
 const { sequelize, NotificationDelivery, Notification } = models;
 
 const POLL_INTERVAL_MS = parseInt(process.env.RETRY_POLLER_INTERVAL_MS, 10) || 5000;
 const BATCH_SIZE = parseInt(process.env.RETRY_POLLER_BATCH_SIZE, 10) || 100;
+const QUEUED_STALE_MINUTES = parseInt(process.env.QUEUED_STALE_MINUTES || '15', 10);
 
 // Poll once and claim rows using SELECT ... FOR UPDATE SKIP LOCKED to avoid races
 async function pollOnce() {
@@ -41,9 +43,9 @@ async function pollOnce() {
     for (const del of deliveries) {
       try {
         const notif = del.notification || await Notification.findByPk(del.notification_id);
-        const topic = notif && notif.priority === 'HIGH' ? topics.NOTIFICATIONS_HIGH : topics.NOTIFICATIONS_LOW;
-        const event = { eventId: notif.id, type: notif.type, priority: notif.priority, payload: notif.payload };
-        await producer.send(topic, [{ key: del.id, value: JSON.stringify(event) }]);
+        const topic = topicForNotificationPriority(notif?.priority || 'LOW');
+        const envelope = { kind: 'DELIVERY_RETRY', deliveryId: del.id };
+        await producer.send(topic, [{ key: del.id, value: JSON.stringify(envelope) }]);
         logger.info('Re-enqueued delivery to Kafka', { deliveryId: del.id, topic });
       } catch (err) {
         logger.error('Failed to re-enqueue delivery after claiming', { deliveryId: del.id, err: err.message });
@@ -61,6 +63,27 @@ async function pollOnce() {
   }
 }
 
+/** Reclaim deliveries stuck in QUEUED (e.g. Kafka publish succeeded but consumer never ran). */
+async function reclaimStaleQueued() {
+  const threshold = new Date(Date.now() - QUEUED_STALE_MINUTES * 60 * 1000);
+  const [n] = await NotificationDelivery.update(
+    {
+      status: 'RETRYING',
+      last_error: 'queued_watchdog_reclaim',
+      next_retry_at: new Date(),
+    },
+    {
+      where: {
+        status: 'QUEUED',
+        updated_at: { [Op.lt]: threshold },
+      },
+    },
+  );
+  if (n > 0) {
+    logger.warn('QUEUED watchdog reclaimed stale rows', { count: n, staleMinutes: QUEUED_STALE_MINUTES });
+  }
+}
+
 async function start() {
   logger.info('Starting retry poller', { intervalMs: POLL_INTERVAL_MS });
   // ensure producer connected
@@ -70,6 +93,7 @@ async function start() {
   const loop = async () => {
     while (running) {
       try {
+        await reclaimStaleQueued();
         await pollOnce();
       } catch (err) {
         logger.error('Retry poller error', { err: err.message });
@@ -85,11 +109,11 @@ async function start() {
   process.on('SIGTERM', stop);
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   start().catch(err => {
     console.error(err);
     process.exit(1);
   });
 }
 
-export { start, pollOnce };
+export { start, pollOnce, reclaimStaleQueued };

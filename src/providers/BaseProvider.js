@@ -3,7 +3,7 @@ class BaseProvider {
     this.name = name;
   }
 
-  async send(payload) {
+  async send(_payload) {
     throw new Error('send() not implemented');
   }
 }

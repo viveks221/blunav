@@ -7,12 +7,45 @@ import BaseWorker from './BaseWorker.js';
 const GROUP_ID = process.env.CONSUMER_GROUP || 'blunav-worker-group';
 const MAX_CONNECT_ATTEMPTS = parseInt(process.env.KAFKA_CONNECT_ATTEMPTS || '10', 10);
 
+const DEFAULT_TOPICS = [topics.NOTIFICATIONS_HIGH, topics.NOTIFICATIONS_LOW].join(',');
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function subscribeTopics() {
+  const raw = process.env.KAFKA_SUBSCRIBE_TOPICS || DEFAULT_TOPICS;
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function parseEnvelope(value) {
+  const raw = value ? value.toString() : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    logger.error('Invalid message JSON, skipping', { err: err.message, raw });
+    return null;
+  }
+}
+
+async function dispatch(worker, envelope) {
+  if (!envelope || typeof envelope !== 'object') return;
+  const kind = envelope.kind || 'EVENT';
+
+  if (kind === 'DELIVERY_RETRY') {
+    if (!envelope.deliveryId) {
+      logger.error('DELIVERY_RETRY missing deliveryId', { envelope });
+      return;
+    }
+    await worker.processDeliveryRetry(envelope.deliveryId);
+    return;
+  }
+
+  await worker.processEvent(envelope);
+}
 
 async function start() {
   const consumer = kafka.consumer({ groupId: GROUP_ID });
   let attempt = 0;
-  // retry connect with exponential backoff
   while (attempt < MAX_CONNECT_ATTEMPTS) {
     try {
       await consumer.connect();
@@ -30,42 +63,35 @@ async function start() {
     throw new Error('Unable to connect to Kafka after multiple attempts');
   }
 
-  await consumer.subscribe({ topic: topics.NOTIFICATIONS_HIGH });
-  await consumer.subscribe({ topic: topics.NOTIFICATIONS_LOW });
+  const topicNames = subscribeTopics();
+  for (const name of topicNames) {
+    await consumer.subscribe({ topic: name });
+  }
+  logger.info('Kafka consumer subscribed', { topics: topicNames });
 
   const worker = new BaseWorker();
 
   const runConfig = {
     eachMessage: async ({ topic, partition, message }) => {
-      const value = message.value ? message.value.toString() : null;
-      if (!value) return;
-      let event;
-      try {
-        event = JSON.parse(value);
-      } catch (err) {
-        logger.error('Invalid message JSON, skipping', { err: err.message, value });
-        return;
-      }
+      const envelope = parseEnvelope(message.value);
+      if (!envelope) return;
 
       try {
-        logger.info('Consuming event', { topic, partition, offset: message.offset, eventId: event.eventId });
-        await worker.processEvent(event);
+        logger.info('Consuming message', { topic, partition, offset: message.offset, kind: envelope.kind || 'EVENT' });
+        await dispatch(worker, envelope);
       } catch (err) {
-        logger.error('Failed to process event', { err: err.message, event });
-        // do not rethrow; allow consumer to continue. Offset commit behavior is handled by kafkajs.
+        logger.error('Failed to process message', { err: err.message, envelope });
       }
-    }
+    },
   };
 
-  // start consumer run loop
   await consumer.run(runConfig);
 
   const shutdown = async () => {
     logger.info('Shutting down consumer gracefully');
     try {
-      // attempt graceful disconnect with timeout
       const dis = consumer.disconnect();
-      const to = new Promise(r => setTimeout(r, 5000));
+      const to = new Promise(r => setTimeout(r, 8000));
       await Promise.race([dis, to]);
     } catch (e) {
       logger.error('Error during consumer disconnect', { err: e.message });
@@ -78,11 +104,5 @@ async function start() {
   process.on('SIGTERM', shutdown);
 }
 
-if (require.main === module) {
-  start().catch(err => {
-    logger.error('Consumer failed to start', { err: err.message });
-    process.exit(1);
-  });
-}
 
 export { start };

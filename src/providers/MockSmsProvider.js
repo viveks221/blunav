@@ -5,7 +5,7 @@ class MockSmsProvider extends BaseProvider {
     super('mock-sms');
   }
 
-  async send({ to, message }) {
+  async send({ to: _to, message: _message }) {
     return { ok: true, id: `sms_${Date.now()}` };
   }
 }

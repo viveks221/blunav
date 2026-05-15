@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import fs from 'fs';
 import BaseWorker from './BaseWorker.js';
 
 async function readStdin() {
