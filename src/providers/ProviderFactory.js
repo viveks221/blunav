@@ -1,11 +1,17 @@
 import MockEmailProvider from './MockEmailProvider.js';
 import MockSmsProvider from './MockSmsProvider.js';
 import MockPushProvider from './MockPushProvider.js';
+import EmailProvider from './EmailProvider.js';
 
 function getProvider(channel) {
   switch (channel) {
     case 'EMAIL':
-      return new MockEmailProvider();
+      // Use real EmailProvider when configured or fall back to mock for tests/dev
+      try {
+        return new EmailProvider();
+      } catch (e) {
+        return new MockEmailProvider();
+      }
     case 'SMS':
       return new MockSmsProvider();
     case 'PUSH':

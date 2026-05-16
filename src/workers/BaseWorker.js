@@ -80,6 +80,7 @@ class BaseWorker {
         status: { [Op.in]: ['PENDING', 'QUEUED', 'RETRYING'] },
       },
     });
+    logger.info('Deliveries to process', { eventId, count: deliveries.length });
 
     for (const d of deliveries) {
       logger.debug('Dispatching delivery', { deliveryId: d.id, notificationId: d.notification_id, channel: d.channel });
@@ -133,6 +134,7 @@ class BaseWorker {
     const t = await sequelize.transaction();
     let claimed;
     try {
+      logger.info('Attempting to claim delivery', { deliveryId: fresh.id });
       const [count, rows] = await NotificationDelivery.update(
         { status: 'SENDING', attempts: sequelize.literal('attempts + 1') },
         {
@@ -152,6 +154,7 @@ class BaseWorker {
       }
 
       claimed = rows[0];
+      logger.info('Delivery claimed', { deliveryId: claimed.id, previousStatus: fresh.status, attempts: claimed.attempts });
       await t.commit();
     } catch (e) {
       try {
@@ -165,6 +168,7 @@ class BaseWorker {
     const providerPayload = buildProviderRequest(fresh.channel, notification ? notification.payload : {});
 
     try {
+      logger.info('Calling provider.send', { deliveryId: fresh.id, provider: providerKey, payloadPreview: providerPayload && Object.keys(providerPayload).slice(0,5) });
       const res = await provider.send(providerPayload);
       logger.info('Provider send success', { deliveryId: fresh.id, provider: providerKey, providerResponse: res });
       try {
@@ -231,7 +235,8 @@ class BaseWorker {
             attempts,
             notificationPayload: notification ? notification.payload : null,
           };
-          await send(NOTIFICATIONS_DLQ, [{ key: fresh.id, value: JSON.stringify(payload) }]);
+          const dlqRes = await send(NOTIFICATIONS_DLQ, [{ key: fresh.id, value: JSON.stringify(payload) }]);
+          logger.info('Published to DLQ', { deliveryId: fresh.id, dlqResult: dlqRes });
         } catch (e) {
           logger.error('Failed publishing to DLQ', { err: e });
         }
@@ -244,6 +249,7 @@ class BaseWorker {
             { status: nextStatus, last_error: err.message, next_retry_at: nextRetry },
             { where: { id: fresh.id, status: 'SENDING' } },
           );
+          logger.info('Scheduled retry for delivery', { deliveryId: fresh.id, attempts, nextRetryAt: nextRetry });
         } catch (e) {
           logger.error('STATE_MACHINE SENDING->RETRYING', { deliveryId: fresh.id, err: e.message });
         }

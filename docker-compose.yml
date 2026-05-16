@@ -63,6 +63,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:9092
       - OUTBOX_INLINE_PUBLISHER=false
+      - RESEND_API_KEY=re_7sSahubL_Mchj4dYqrDrU9SLTv24AAqet
 
   outbox-publisher:
     build: .
@@ -86,6 +87,8 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - REDIS_URL=redis://redis:6379
       - KAFKA_SUBSCRIBE_TOPICS=notifications.high,notifications.low
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/notifications_db
+      - RESEND_API_KEY=re_7sSahubL_Mchj4dYqrDrU9SLTv24AAqet
     command: sh -c "npm run start-consumer"
     restart: unless-stopped
 
@@ -101,6 +104,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - CONSUMER_GROUP=blunav-worker-high
       - KAFKA_SUBSCRIBE_TOPICS=notifications.high
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/notifications_db
+      - RESEND_API_KEY=re_7sSahubL_Mchj4dYqrDrU9SLTv24AAqet
     command: sh -c "npm run start-consumer"
 
   worker-low:
@@ -115,6 +120,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - CONSUMER_GROUP=blunav-worker-low
       - KAFKA_SUBSCRIBE_TOPICS=notifications.low
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/notifications_db
+      - RESEND_API_KEY=re_7sSahubL_Mchj4dYqrDrU9SLTv24AAqet
     command: sh -c "npm run start-consumer"
 
 volumes:

@@ -62,6 +62,7 @@ export async function publishOnce() {
       await t.commit();
       return 0;
     }
+    logger.info('Outbox claim', { count: rows.length, eventIds: rows.map((r) => r.event_id) });
 
     await NotificationOutbox.update(
       { status: 'processing' },

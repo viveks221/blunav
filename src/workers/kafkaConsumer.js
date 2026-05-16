@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { fileURLToPath } from 'url';
 import { kafka } from '../queue/kafka.js';
 import topics from '../queue/topics.js';
 import logger from '../logger/index.js';
@@ -44,14 +45,19 @@ async function dispatch(worker, envelope) {
 }
 
 async function start() {
+  console.log('WORKER: Creating Kafka consumer...');
   const consumer = kafka.consumer({ groupId: GROUP_ID });
+  console.log('WORKER: Kafka consumer created, attempting connect...');
   let attempt = 0;
   while (attempt < MAX_CONNECT_ATTEMPTS) {
+    console.log('WORKER: Connect attempt', attempt + 1);
     try {
       await consumer.connect();
+      console.log('WORKER: Connected!');
       logger.info('Kafka consumer connected', { groupId: GROUP_ID });
       break;
     } catch (err) {
+      console.log('WORKER: Connect failed:', err.message);
       attempt += 1;
       const backoff = Math.min(30000, Math.pow(2, attempt) * 100);
       logger.warn('Kafka consumer connect failed, retrying', { attempt, err: err.message, backoff });
@@ -68,6 +74,8 @@ async function start() {
     await consumer.subscribe({ topic: name });
   }
   logger.info('Kafka consumer subscribed', { topics: topicNames });
+
+  logger.info('Kafka consumer starting run loop', { groupId: GROUP_ID });
 
   const worker = new BaseWorker();
 
@@ -87,6 +95,8 @@ async function start() {
 
   await consumer.run(runConfig);
 
+  logger.info('Kafka consumer run loop active', { groupId: GROUP_ID });
+
   const shutdown = async () => {
     logger.info('Shutting down consumer gracefully');
     try {
@@ -104,5 +114,12 @@ async function start() {
   process.on('SIGTERM', shutdown);
 }
 
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  start().catch((err) => {
+    console.error('WORKER: Fatal error:', err);
+    process.exit(1);
+  });
+}
 
 export { start };
